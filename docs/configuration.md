@@ -72,7 +72,13 @@ claude:
   timeout_seconds: 900
   default_mode: plan
   write_permission_mode: acceptEdits
+  output_format: text   # set to "json" to capture only the final message
 ```
+
+When `output_format: json` is set, the adapter passes `--output-format json` to
+the Claude CLI and extracts the `result` field, so the recorded step output is
+the final answer without surrounding tool/log noise. It falls back to the raw
+captured text if the envelope cannot be parsed.
 
 ## Commands
 

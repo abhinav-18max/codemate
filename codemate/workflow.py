@@ -79,11 +79,13 @@ def _run_main_flow(
 
     attempts = 0
     while True:
-        review_passed = _review_step(config, artifacts, state, review)
+        review_passed, review_reason = _review_step(config, artifacts, state, review)
         if review_passed:
             break
         if attempts >= max_retries:
-            _finish_needs_human(artifacts, state, "Review failed after max fix attempts")
+            _finish_needs_human(
+                artifacts, state, review_reason or "Review failed after max fix attempts"
+            )
             return
         attempts += 1
         _fix_step(config, artifacts, state, fix, attempts)
@@ -104,9 +106,11 @@ def _run_main_flow(
             return
         attempts += 1
         _fix_step(config, artifacts, state, fix, attempts)
-        review_passed = _review_step(config, artifacts, state, review)
+        review_passed, review_reason = _review_step(config, artifacts, state, review)
         if not review_passed and attempts >= max_retries:
-            _finish_needs_human(artifacts, state, "Review failed during test fix loop")
+            _finish_needs_human(
+                artifacts, state, review_reason or "Review failed during test fix loop"
+            )
             return
 
 
@@ -186,13 +190,13 @@ def _agent_step(
 
 def _review_step(
     config: TeamConfig, artifacts: RunArtifacts, state: RunState, step: dict[str, Any]
-) -> bool:
+) -> tuple[bool, str | None]:
     output_path = _agent_step(config, artifacts, state, step, "REVIEWING", "REVIEWED")
     output = output_path.read_text(errors="replace")
-    passed = _review_passed(output)
+    passed, reason = _review_verdict(output)
     state.status = "REVIEW_PASSED" if passed else "REVIEW_FAILED"
     artifacts.write_state(state)
-    return passed
+    return passed, reason
 
 
 def _test_step(
@@ -260,35 +264,88 @@ def _render_prompt(
     return template
 
 
-def _review_passed(output: str) -> bool:
-    stripped = output.strip()
-    if stripped.startswith("{"):
+_PASS_DECISIONS = {"pass", "passed", "approve", "approved", "success", "lgtm"}
+_FAIL_DECISIONS = {
+    "fail",
+    "failed",
+    "reject",
+    "rejected",
+    "changes_requested",
+    "blocking",
+    "block",
+}
+
+
+def _review_verdict(output: str) -> tuple[bool, str | None]:
+    """Decide whether a review passed, failing closed when undetermined.
+
+    A review only passes on an explicit, machine-parseable pass decision. Empty,
+    truncated, or ambiguous output is treated as a failure so it surfaces to a
+    human instead of silently approving unreviewed changes.
+    """
+    decision = _extract_decision(output)
+    if decision == "pass":
+        return True, None
+    if decision == "fail":
+        return False, "Review returned a blocking decision"
+    return False, "Review decision could not be determined (failing closed)"
+
+
+def _extract_decision(output: str) -> str | None:
+    text = output.strip()
+    if not text:
+        return None
+    for candidate in _json_candidates(text):
         try:
-            data = json.loads(stripped)
+            data = json.loads(candidate)
         except json.JSONDecodeError:
-            data = {}
-        decision = str(data.get("decision", data.get("status", ""))).lower()
-        if decision in {"pass", "passed", "approved", "success"}:
-            return True
-        if decision in {"fail", "failed", "changes_requested", "blocking"}:
-            return False
-    lowered = output.lower()
-    pass_markers = [
-        "decision: pass",
-        "decision: passed",
-        "status: pass",
-        "status: passed",
-    ]
-    if any(marker in lowered for marker in pass_markers):
-        return True
-    failure_markers = [
-        "decision: fail",
-        "decision: failed",
-        "status: changes_requested",
-        "changes_requested",
-        "blocking",
-    ]
-    return not any(marker in lowered for marker in failure_markers)
+            continue
+        if isinstance(data, dict):
+            mapped = _map_decision(str(data.get("decision", data.get("status", ""))))
+            if mapped:
+                return mapped
+    # Fall back to an explicit marker line; the last stated decision wins.
+    for line in reversed(text.splitlines()):
+        lowered = line.strip().lower()
+        for key in ("decision:", "status:", "verdict:"):
+            if lowered.startswith(key):
+                mapped = _map_decision(lowered[len(key):])
+                if mapped:
+                    return mapped
+    return None
+
+
+def _json_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    if text.startswith("{") and text.endswith("}"):
+        candidates.append(text)
+    depth = 0
+    start = -1
+    for index, char in enumerate(text):
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start != -1:
+                candidates.append(text[start : index + 1])
+                start = -1
+    # Prefer the last balanced object (closest to the agent's final answer).
+    candidates.reverse()
+    return candidates
+
+
+def _map_decision(value: str) -> str | None:
+    token = value.strip().strip(".\"'").lower()
+    if not token:
+        return None
+    first = token.replace("-", "_").split()[0]
+    if first in _PASS_DECISIONS or token in _PASS_DECISIONS:
+        return "pass"
+    if first in _FAIL_DECISIONS or token in _FAIL_DECISIONS:
+        return "fail"
+    return None
 
 
 def _source_changed_files(config: TeamConfig) -> list[str]:

@@ -11,16 +11,28 @@ Plan -> Implement -> Review -> Test
 The CLI owns sequencing, git state, run artifacts, local test execution, and
 policy checks. Agent CLIs only receive one bounded role at a time.
 
-## Install for Local Development
+## Install
+
+The PyPI distribution is `codemate-team`; it installs a `codemate` command.
+
+As a global CLI tool (recommended):
 
 ```bash
-uv run --with-editable . team --help
+uv tool install codemate-team
+# or: pipx install codemate-team
+codemate --help
 ```
 
-After packaging or installing normally, the command is:
+Run once without installing:
 
 ```bash
-team --help
+uvx --from codemate-team codemate --help
+```
+
+For local development from a checkout:
+
+```bash
+uv run --with-editable . codemate --help
 ```
 
 ## Quick Start
@@ -28,39 +40,39 @@ team --help
 Initialize a repo:
 
 ```bash
-team init
+codemate init
 ```
 
 Review and edit `team.yml`, then check local prerequisites:
 
 ```bash
-team doctor
+codemate doctor
 ```
 
 Run a task:
 
 ```bash
-team run "Fix the flaky checkout test"
+codemate run "Fix the flaky checkout test"
 ```
 
 Inspect results:
 
 ```bash
-team status
-team logs --step implement
-team diff
+codemate status
+codemate logs --step implement
+codemate diff
 ```
 
 Accept or reset:
 
 ```bash
-team accept --commit --message "Fix flaky checkout test"
-team reset
+codemate accept --commit --message "Fix flaky checkout test"
+codemate reset
 ```
 
 ## Generated Project Files
 
-`team init` creates:
+`codemate init` creates:
 
 ```text
 team.yml

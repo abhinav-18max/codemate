@@ -17,7 +17,7 @@ codemate/
 
 ## Run Lifecycle
 
-`team run "task"` does this:
+`codemate run "task"` does this:
 
 1. Load and validate `team.yml`.
 2. Verify the current directory is a git repo.

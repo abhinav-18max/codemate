@@ -5,7 +5,7 @@
 The intended model is:
 
 ```text
-team CLI = supervisor
+codemate CLI = supervisor
 Claude Code = agent harness
 Codex CLI = agent harness
 Local commands = deterministic harness

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -61,10 +62,16 @@ class ClaudeCodeAdapter(AgentAdapter):
         command = str(input.config.get("command", "claude"))
         _require_executable(command)
         permission_mode = _claude_permission_mode(input.mode, input.config)
+        output_format = str(input.config.get("output_format", "text"))
         args = [command, "-p", input.prompt, "--permission-mode", permission_mode]
+        if output_format != "text":
+            args.extend(["--output-format", output_format])
         result = _run_process(args, input)
+        # Claude Code streams its final answer to stdout (captured in the raw log)
+        # rather than to a dedicated output file, so derive the output ourselves.
         if not input.output_path.read_text(errors="replace").strip():
-            input.output_path.write_text(input.raw_log_path.read_text(errors="replace"))
+            raw = input.raw_log_path.read_text(errors="replace")
+            input.output_path.write_text(_extract_claude_message(raw, output_format))
         return result
 
 
@@ -75,6 +82,23 @@ def adapter_for(config: dict[str, Any]) -> AgentAdapter:
     if provider == "claude-code":
         return ClaudeCodeAdapter()
     raise ValueError(f"Unsupported agent provider: {provider}")
+
+
+def _extract_claude_message(raw: str, output_format: str) -> str:
+    """Pull the assistant's final message out of captured Claude Code output.
+
+    With `--output-format json` the CLI emits a result envelope; extract its
+    `result` field. Anything else (including malformed JSON) falls back to the
+    raw captured text so no output is ever silently dropped.
+    """
+    if output_format == "json":
+        try:
+            data = json.loads(raw.strip() or "{}")
+        except json.JSONDecodeError:
+            return raw
+        if isinstance(data, dict) and isinstance(data.get("result"), str):
+            return data["result"]
+    return raw
 
 
 def _claude_permission_mode(mode: str, config: dict[str, Any]) -> str:

@@ -16,4 +16,7 @@ Rules:
 - Do not edit files.
 - Review correctness, missed edge cases, security, tests, and maintainability.
 - Return blocking and non-blocking findings.
-- Give a final decision: pass or fail.
+- Decide "fail" if there is any blocking finding or you cannot complete the review.
+
+End your response with a final line containing only a JSON object and nothing else:
+{"decision": "pass" | "fail", "blocking_findings": ["..."]}

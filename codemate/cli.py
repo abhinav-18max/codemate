@@ -13,7 +13,7 @@ from .workflow import run_task
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="team")
+    parser = argparse.ArgumentParser(prog="codemate")
     parser.add_argument("--root", default=".", help="Project root")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "reset":
             return _reset(root, args.run_id)
     except Exception as exc:
-        print(f"team: error: {exc}", file=sys.stderr)
+        print(f"codemate: error: {exc}", file=sys.stderr)
         return 1
     return 1
 

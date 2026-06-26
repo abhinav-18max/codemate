@@ -89,7 +89,7 @@ class RunLock:
             if self._is_stale():
                 self.path.unlink()
             else:
-                raise RuntimeError(f"Another team run appears active: {self.path}")
+                raise RuntimeError(f"Another codemate run appears active: {self.path}")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(

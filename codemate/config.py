@@ -148,7 +148,10 @@ Rules:
 - Do not edit files.
 - Review correctness, missed edge cases, security, tests, and maintainability.
 - Return blocking and non-blocking findings.
-- Give a final decision: pass or fail.
+- Decide "fail" if there is any blocking finding or you cannot complete the review.
+
+End your response with a final line containing only a JSON object and nothing else:
+{"decision": "pass" | "fail", "blocking_findings": ["..."]}
 """,
     "fix.md": """You are the fix agent.
 
@@ -173,7 +176,16 @@ Rules:
 SCHEMAS = {
     "plan.schema.json": '{"type":"object"}\n',
     "implementation.schema.json": '{"type":"object"}\n',
-    "review.schema.json": '{"type":"object"}\n',
+    "review.schema.json": (
+        '{\n'
+        '  "type": "object",\n'
+        '  "required": ["decision"],\n'
+        '  "properties": {\n'
+        '    "decision": {"type": "string", "enum": ["pass", "fail"]},\n'
+        '    "blocking_findings": {"type": "array", "items": {"type": "string"}}\n'
+        '  }\n'
+        '}\n'
+    ),
 }
 
 
@@ -186,7 +198,7 @@ GITIGNORE_PATTERNS = [
 PROJECT_DOCS = {
     "team.md": """# Team CLI
 
-This project uses `team` as a sequential AI development harness.
+This project uses `codemate` as a sequential AI development harness.
 
 The CLI owns the workflow. Agent CLIs such as Codex and Claude Code are treated
 as single-step workers. Local commands and git remain the source of truth.
@@ -206,13 +218,13 @@ plan -> implement -> review -> test
 ## Daily Commands
 
 ```bash
-team doctor
-team run "Describe the task"
-team status
-team logs --step implement
-team diff
-team accept --commit --message "Describe accepted changes"
-team reset
+codemate doctor
+codemate run "Describe the task"
+codemate status
+codemate logs --step implement
+codemate diff
+codemate accept --commit --message "Describe accepted changes"
+codemate reset
 ```
 
 ## Important Safety Rules
@@ -279,7 +291,7 @@ class TeamConfig:
 def load_config(root: Path) -> TeamConfig:
     config_path = root / "team.yml"
     if not config_path.exists():
-        raise FileNotFoundError("team.yml not found. Run `team init` first.")
+        raise FileNotFoundError("team.yml not found. Run `codemate init` first.")
     raw = load_yaml(config_path)
     validate_config(raw)
     return TeamConfig(root=root, raw=raw)
