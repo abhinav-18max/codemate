@@ -1,0 +1,17 @@
+[project]
+name = "codemate"
+version = "0.1.0"
+description = "Sequential AI development team runner"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+team = "codemate.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["codemate*"]

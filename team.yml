@@ -1,0 +1,84 @@
+version: 1
+
+project:
+  name: codemate-project
+  default_branch: main
+
+workflow:
+  default: plan_implement_review_test
+  flows:
+    plan_implement_review_test:
+      steps:
+        - id: plan
+          type: agent
+          agent: claude
+          mode: read_only
+          output: plan
+        - id: implement
+          type: agent
+          agent: codex
+          mode: write
+          input:
+            - plan
+          output: implementation
+        - id: review
+          type: agent
+          agent: claude
+          mode: review_only
+          input:
+            - plan
+            - implementation
+            - git_diff
+          output: review
+        - id: test
+          type: command
+          command_group: test
+        - id: fix_if_needed
+          type: agent
+          agent: codex
+          mode: write
+          when: tests_failed_or_review_blocking
+          input:
+            - review
+            - test_log
+          max_retries: 2
+
+agents:
+  claude:
+    provider: claude-code
+    command: claude
+    default_mode: plan
+    timeout_seconds: 900
+  codex:
+    provider: codex-cli
+    command: codex
+    default_mode: workspace-write
+    timeout_seconds: 900
+    sandbox: workspace-write
+    approval: never
+
+commands:
+  test:
+    - python -m unittest discover -s tests
+
+git:
+  strategy: branch
+  branch_prefix: ai/team
+  checkpoint_commits: false
+  require_clean_worktree: true
+
+limits:
+  max_fix_retries: 2
+  max_changed_files: 25
+  max_diff_lines: 1500
+
+policies:
+  allow_paths:
+    - "**"
+  deny_paths:
+    - .env
+    - .env.*
+    - secrets/**
+    - .git/**
+    - node_modules/**
+    - .team/runs/**
