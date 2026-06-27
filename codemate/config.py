@@ -62,6 +62,8 @@ agents:
     command: claude
     default_mode: plan
     timeout_seconds: 900
+    # model: opus           # opus | sonnet | haiku | fable | full model id
+    # effort: high          # low | medium | high | xhigh | max
   codex:
     provider: codex-cli
     command: codex
@@ -69,6 +71,8 @@ agents:
     timeout_seconds: 900
     sandbox: workspace-write
     approval: never
+    # model: gpt-5-codex
+    # reasoning_effort: high  # low | medium | high
 
 commands:
   test: []
@@ -328,6 +332,14 @@ def validate_config(raw: dict[str, Any]) -> None:
             raise ConfigError(f"agents.{name}.provider is unsupported: {provider}")
         if not isinstance(agent.get("command"), str) or not agent["command"]:
             raise ConfigError(f"agents.{name}.command must be a non-empty string")
+        for key in ("model", "effort", "reasoning_effort"):
+            if key in agent and not isinstance(agent[key], str):
+                raise ConfigError(f"agents.{name}.{key} must be a string")
+        extra = agent.get("extra_args")
+        if extra is not None and not isinstance(extra, (str, list)):
+            raise ConfigError(f"agents.{name}.extra_args must be a string or list")
+        if isinstance(extra, list) and not all(isinstance(item, str) for item in extra):
+            raise ConfigError(f"agents.{name}.extra_args entries must be strings")
 
     for flow_name, flow in flows.items():
         if not isinstance(flow, dict):

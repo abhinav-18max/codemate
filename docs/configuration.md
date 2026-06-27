@@ -52,6 +52,47 @@ Supported providers:
 - `codex-cli`
 - `claude-code`
 
+### Model and effort
+
+Each agent can pin a model and a reasoning/effort level. These map to the
+underlying CLI flags, so the agent in a given step uses exactly the model you
+choose for it:
+
+| Key | Claude Code | Codex CLI |
+|---|---|---|
+| `model` | `--model` (`opus`, `sonnet`, `haiku`, `fable`, or a full id) | `-m` (e.g. `gpt-5-codex`) |
+| `effort` (alias `reasoning_effort`) | `--effort` (`low`..`max`) | `-c model_reasoning_effort=...` (`low`/`medium`/`high`) |
+| `extra_args` | passed through verbatim | passed through verbatim |
+
+Use a cheaper, faster model for planning/review and a stronger one for
+implementation, for example:
+
+```yaml
+agents:
+  claude:
+    provider: claude-code
+    command: claude
+    model: sonnet
+    effort: medium
+  codex:
+    provider: codex-cli
+    command: codex
+    sandbox: workspace-write
+    model: gpt-5-codex
+    reasoning_effort: high
+```
+
+`extra_args` is an escape hatch for any flag not modeled here:
+
+```yaml
+codex:
+  provider: codex-cli
+  command: codex
+  extra_args:
+    - "-c"
+    - "model_reasoning_summary=concise"
+```
+
 Codex config example:
 
 ```yaml

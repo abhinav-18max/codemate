@@ -42,43 +42,88 @@ class CodexCliAdapter(AgentAdapter):
     def run(self, input: AgentRunInput) -> AgentRunResult:
         command = str(input.config.get("command", "codex"))
         _require_executable(command)
-        args = [
-            command,
-            "exec",
-            "--cd",
-            str(input.cwd),
-            "--sandbox",
-            str(input.config.get("sandbox", "workspace-write")),
-            "--output-last-message",
-            str(input.output_path),
-        ]
-        # `codex exec` is non-interactive; approvals are governed by config, not a
-        # flag. Keep an opt-in override for environments that need it explicitly.
-        approval_policy = input.config.get("approval_policy")
-        if approval_policy:
-            args.extend(["-c", f"approval_policy={json.dumps(str(approval_policy))}"])
-        if input.schema_path and input.schema_path.exists():
-            args.extend(["--output-schema", str(input.schema_path)])
-        args.append(input.prompt)
-        return _run_process(args, input)
+        return _run_process(codex_args(input), input)
 
 
 class ClaudeCodeAdapter(AgentAdapter):
     def run(self, input: AgentRunInput) -> AgentRunResult:
         command = str(input.config.get("command", "claude"))
         _require_executable(command)
-        permission_mode = _claude_permission_mode(input.mode, input.config)
         output_format = str(input.config.get("output_format", "text"))
-        args = [command, "-p", input.prompt, "--permission-mode", permission_mode]
-        if output_format != "text":
-            args.extend(["--output-format", output_format])
-        result = _run_process(args, input)
+        result = _run_process(claude_args(input), input)
         # Claude Code streams its final answer to stdout (captured in the raw log)
         # rather than to a dedicated output file, so derive the output ourselves.
         if not input.output_path.read_text(errors="replace").strip():
             raw = input.raw_log_path.read_text(errors="replace")
             input.output_path.write_text(_extract_claude_message(raw, output_format))
         return result
+
+
+def codex_args(input: AgentRunInput) -> list[str]:
+    config = input.config
+    args = [
+        str(config.get("command", "codex")),
+        "exec",
+        "--cd",
+        str(input.cwd),
+        "--sandbox",
+        str(config.get("sandbox", "workspace-write")),
+        "--output-last-message",
+        str(input.output_path),
+    ]
+    model = config.get("model")
+    if model:
+        args.extend(["-m", str(model)])
+    effort = _effort(config)
+    if effort:
+        args.extend(["-c", f"model_reasoning_effort={json.dumps(effort)}"])
+    # `codex exec` is non-interactive; approvals are governed by config, not a
+    # flag. Keep an opt-in override for environments that need it explicitly.
+    approval_policy = config.get("approval_policy")
+    if approval_policy:
+        args.extend(["-c", f"approval_policy={json.dumps(str(approval_policy))}"])
+    args.extend(_extra_args(config))
+    if input.schema_path and input.schema_path.exists():
+        args.extend(["--output-schema", str(input.schema_path)])
+    args.append(input.prompt)
+    return args
+
+
+def claude_args(input: AgentRunInput) -> list[str]:
+    config = input.config
+    permission_mode = _claude_permission_mode(input.mode, config)
+    args = [
+        str(config.get("command", "claude")),
+        "-p",
+        input.prompt,
+        "--permission-mode",
+        permission_mode,
+    ]
+    model = config.get("model")
+    if model:
+        args.extend(["--model", str(model)])
+    effort = _effort(config)
+    if effort:
+        args.extend(["--effort", effort])
+    output_format = str(config.get("output_format", "text"))
+    if output_format != "text":
+        args.extend(["--output-format", output_format])
+    args.extend(_extra_args(config))
+    return args
+
+
+def _effort(config: dict[str, Any]) -> str | None:
+    value = config.get("effort", config.get("reasoning_effort"))
+    return str(value) if value else None
+
+
+def _extra_args(config: dict[str, Any]) -> list[str]:
+    extra = config.get("extra_args", [])
+    if isinstance(extra, str):
+        return [extra]
+    if isinstance(extra, list):
+        return [str(item) for item in extra]
+    return []
 
 
 def adapter_for(config: dict[str, Any]) -> AgentAdapter:

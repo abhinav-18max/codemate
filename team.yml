@@ -49,6 +49,8 @@ agents:
     command: claude
     default_mode: plan
     timeout_seconds: 900
+    # model: opus           # opus | sonnet | haiku | fable | full model id
+    # effort: high          # low | medium | high | xhigh | max
   codex:
     provider: codex-cli
     command: codex
@@ -56,6 +58,8 @@ agents:
     timeout_seconds: 900
     sandbox: workspace-write
     approval: never
+    # model: gpt-5-codex
+    # reasoning_effort: high  # low | medium | high
 
 commands:
   test:
