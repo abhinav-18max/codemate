@@ -82,6 +82,23 @@ agents:
     reasoning_effort: high
 ```
 
+The same keys (`model`, `effort`/`reasoning_effort`, `provider`, `sandbox`,
+`output_format`, `extra_args`, `timeout_seconds`) can also be set directly on a
+workflow step, where they override the agent's value for that step only. This is
+how you give one step a different model without defining a second agent:
+
+```yaml
+- id: review
+  type: agent
+  agent: claude
+  mode: review_only
+  model: sonnet      # review uses sonnet even though the claude agent is opus
+  effort: medium
+```
+
+The interactive session can set these live with `/set <step|agent> <key>
+<value>` (see the Commands doc).
+
 `extra_args` is an escape hatch for any flag not modeled here:
 
 ```yaml

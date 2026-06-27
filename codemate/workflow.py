@@ -155,9 +155,12 @@ def _agent_step(
     schema_path = config.root / ".team" / "schemas" / f"{output_name}.schema.json"
 
     agent_name = str(step["agent"])
-    agent_config = config.agent(agent_name)
+    agent_config = _agent_config_for_step(config, step)
     mode = str(step.get("mode", "read_only"))
-    reporter.step(str(step["id"]), f"{agent_name} · {mode}")
+    detail = " · ".join(
+        part for part in (agent_name, agent_config.get("model"), mode) if part
+    )
+    reporter.step(str(step["id"]), detail)
     adapter = adapter_for(agent_config)
     result = adapter.run(
         AgentRunInput(
@@ -440,6 +443,37 @@ Branch: {state.branch}
 Changed files:
 {changed}
 """
+
+
+STEP_OVERRIDE_KEYS = (
+    "provider",
+    "command",
+    "model",
+    "effort",
+    "reasoning_effort",
+    "sandbox",
+    "output_format",
+    "extra_args",
+    "timeout_seconds",
+    "approval_policy",
+    "write_permission_mode",
+)
+
+
+def _agent_config_for_step(config: TeamConfig, step: dict[str, Any]) -> dict[str, Any]:
+    """Agent config for a step, with any step-level keys overlaid on top.
+
+    This lets a single step pin its own model/effort/provider without defining a
+    separate agent, e.g. a cheap model for plan/review and a stronger one for
+    implement.
+    """
+    agent_config = config.agent(str(step["agent"]))
+    overrides = {key: step[key] for key in STEP_OVERRIDE_KEYS if key in step}
+    if not overrides:
+        return agent_config
+    merged = dict(agent_config)
+    merged.update(overrides)
+    return merged
 
 
 def _find_step(steps: list[dict[str, Any]], step_id: str) -> dict[str, Any] | None:

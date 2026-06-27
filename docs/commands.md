@@ -25,7 +25,24 @@ codemate› /exit
 ```
 
 Available slash commands: `/help`, `/status`, `/diff`, `/logs [step]`,
-`/accept [commit <msg>]`, `/reset`, `/flow [name]`, `/clear`, `/exit`.
+`/agents`, `/steps`, `/set`, `/unset`, `/accept [commit <msg>]`, `/reset`,
+`/flow [name]`, `/clear`, `/exit`.
+
+`/agents` and `/steps` show the provider/model/effort each agent and step will
+use. `/set <target> <key> <value>` tunes them on the fly, where `<target>` is
+an agent name (affects every step using it) or a step id (an override for just
+that step):
+
+```text
+codemate› /set review model sonnet     # cheaper model for the review step only
+codemate› /set codex effort low        # lower effort for all codex steps
+codemate› /steps                       # confirm the effective settings
+codemate› /unset review model          # drop the per-step override
+```
+
+Settable keys: `model`, `effort` (alias `reasoning_effort`), `provider`,
+`sandbox`, `output_format`, `command`, `timeout_seconds`. Changes apply to
+subsequent runs in this session; they are not written back to `team.yml`.
 
 `chat` accepts `--flow`, `--quiet`, and `--no-color`. Because each task runs on
 its own branch and leaves changes in the working tree, run `/accept` or `/reset`

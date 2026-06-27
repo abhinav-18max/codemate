@@ -4,18 +4,37 @@ import atexit
 import sys
 from pathlib import Path
 
-from .config import TeamConfig, load_config
+from .config import ConfigError, TeamConfig, load_config, validate_config
 from .git_tools import diff, ensure_repo
 from .reporter import Reporter
-from .workflow import WorkflowError, run_task
+from .workflow import STEP_OVERRIDE_KEYS, WorkflowError, _agent_config_for_step, run_task
 
 PROMPT = "\ncodemate› "
+
+_SETTABLE_KEYS = {
+    "model",
+    "effort",
+    "reasoning_effort",
+    "provider",
+    "sandbox",
+    "output_format",
+    "command",
+    "timeout_seconds",
+    "write_permission_mode",
+    "approval_policy",
+}
+
+_MISSING = object()
 
 HELP = """commands:
   /help              show this help
   /status            show the latest run status
   /diff              show the current git diff
   /logs [step]       show logs for the latest run (optionally one step)
+  /agents            show agents and their provider/model/effort
+  /steps             show each step and the model/effort it will use
+  /set <t> <k> <v>   set key k on a step id or agent name (model, effort, ...)
+  /unset <t> <k>     remove a key from a step id or agent name
   /accept            keep changes in the working tree
   /accept commit msg commit the changes with a message
   /reset             revert files changed by the latest run
@@ -23,7 +42,8 @@ HELP = """commands:
   /clear             clear the screen
   /exit              quit the session
 
-Type anything else and it runs as a task through the active flow."""
+Type anything else and it runs as a task through the active flow.
+Examples: /set review model sonnet · /set codex effort high · /unset review model"""
 
 
 def run_session(
@@ -101,6 +121,20 @@ def _handle_command(
         print(diff(root), end="")
     elif cmd == "logs":
         cli._logs(root, None, rest[0] if rest else None)
+    elif cmd == "agents":
+        _print_agents(config)
+    elif cmd == "steps":
+        _print_steps(config, flow_name)
+    elif cmd == "set":
+        if len(rest) < 3:
+            print("usage: /set <step-id|agent> <key> <value>")
+        else:
+            _set_config(config, flow_name, rest[0], rest[1], " ".join(rest[2:]))
+    elif cmd == "unset":
+        if len(rest) < 2:
+            print("usage: /unset <step-id|agent> <key>")
+        else:
+            _unset_config(config, flow_name, rest[0], rest[1])
     elif cmd == "accept":
         commit = bool(rest) and rest[0] == "commit"
         message = " ".join(rest[1:]) if commit and len(rest) > 1 else None
@@ -122,6 +156,95 @@ def _handle_command(
     else:
         print(f"unknown command: /{cmd} (try /help)")
     return False, flow_name
+
+
+def _effort_of(config_map: dict) -> str:
+    return config_map.get("effort") or config_map.get("reasoning_effort") or "(cli default)"
+
+
+def _print_agents(config: TeamConfig) -> None:
+    print("agents:")
+    for name, agent in config.raw.get("agents", {}).items():
+        if not isinstance(agent, dict):
+            continue
+        provider = agent.get("provider", "?")
+        model = agent.get("model", "(cli default)")
+        print(f"  {name:<10} {provider:<12} model={model}  effort={_effort_of(agent)}")
+
+
+def _print_steps(config: TeamConfig, flow_name: str) -> None:
+    print(f"steps (flow: {flow_name}):")
+    for step in config.flow_steps(flow_name):
+        sid = str(step.get("id"))
+        if step.get("type") == "command":
+            print(f"  {sid:<10} command group: {step.get('command_group')}")
+            continue
+        merged = _agent_config_for_step(config, step)
+        model = merged.get("model", "(cli default)")
+        overrides = [key for key in STEP_OVERRIDE_KEYS if key in step]
+        suffix = f"  [override: {', '.join(overrides)}]" if overrides else ""
+        print(
+            f"  {sid:<10} {step.get('agent')} ({merged.get('provider')})  "
+            f"model={model}  effort={_effort_of(merged)}{suffix}"
+        )
+
+
+def _resolve_target(config: TeamConfig, flow_name: str, target: str) -> tuple[str | None, dict | None]:
+    for step in config.flow_steps(flow_name):
+        if str(step.get("id")) == target and step.get("type") == "agent":
+            return "step", step
+    agents = config.raw.get("agents", {})
+    if isinstance(agents.get(target), dict):
+        return "agent", agents[target]
+    return None, None
+
+
+def _set_config(config: TeamConfig, flow_name: str, target: str, key: str, value: str) -> None:
+    key = key.lower()
+    if key not in _SETTABLE_KEYS:
+        print(
+            f"codemate: error: cannot set '{key}' "
+            f"(allowed: {', '.join(sorted(_SETTABLE_KEYS))})",
+            file=sys.stderr,
+        )
+        return
+    kind, obj = _resolve_target(config, flow_name, target)
+    if kind is None or obj is None:
+        print(f"codemate: error: no step or agent named '{target}'", file=sys.stderr)
+        return
+    if kind == "step" and key not in STEP_OVERRIDE_KEYS:
+        print(f"codemate: error: '{key}' cannot be set per step", file=sys.stderr)
+        return
+    if key == "provider" and value not in {"codex-cli", "claude-code"}:
+        print("codemate: error: provider must be codex-cli or claude-code", file=sys.stderr)
+        return
+    coerced: object = int(value) if key == "timeout_seconds" and value.isdigit() else value
+
+    previous = obj.get(key, _MISSING)
+    obj[key] = coerced
+    try:
+        validate_config(config.raw)
+    except ConfigError as exc:
+        if previous is _MISSING:
+            obj.pop(key, None)
+        else:
+            obj[key] = previous
+        print(f"codemate: error: {exc}", file=sys.stderr)
+        return
+    where = f"step {target}" if kind == "step" else f"agent {target}"
+    print(f"set {where}.{key} = {coerced}")
+
+
+def _unset_config(config: TeamConfig, flow_name: str, target: str, key: str) -> None:
+    kind, obj = _resolve_target(config, flow_name, target)
+    if kind is None or obj is None:
+        print(f"codemate: error: no step or agent named '{target}'", file=sys.stderr)
+        return
+    if key in obj:
+        del obj[key]
+        print(f"unset {target}.{key}")
+    else:
+        print(f"{target} has no '{key}' set")
 
 
 def _print_banner(root: Path, flow_name: str) -> None:

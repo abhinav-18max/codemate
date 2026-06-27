@@ -82,5 +82,68 @@ class SessionCommandTests(unittest.TestCase):
                 self.assertTrue(stop)
 
 
+class SessionConfigTests(unittest.TestCase):
+    def _silent(self):
+        return contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            io.StringIO()
+        )
+
+    def test_set_step_override_and_unset(self) -> None:
+        from codemate.workflow import _agent_config_for_step
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _init_repo(root)
+            config = load_config(root)
+            flow = config.default_flow_name
+            out, err = self._silent()
+            with out, err:
+                session._handle_command(root, config, "/set review model sonnet", flow)
+
+            review = next(s for s in config.flow_steps(flow) if s.get("id") == "review")
+            self.assertEqual(review["model"], "sonnet")
+            # The merged config a run would use reflects the override.
+            self.assertEqual(_agent_config_for_step(config, review)["model"], "sonnet")
+
+            out, err = self._silent()
+            with out, err:
+                session._handle_command(root, config, "/unset review model", flow)
+            self.assertNotIn("model", review)
+
+    def test_set_agent_level(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _init_repo(root)
+            config = load_config(root)
+            flow = config.default_flow_name
+            out, err = self._silent()
+            with out, err:
+                session._handle_command(root, config, "/set codex effort low", flow)
+            self.assertEqual(config.raw["agents"]["codex"]["effort"], "low")
+
+    def test_invalid_provider_is_rejected_and_reverted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _init_repo(root)
+            config = load_config(root)
+            flow = config.default_flow_name
+            out, err = self._silent()
+            with out, err:
+                session._handle_command(root, config, "/set codex provider bogus", flow)
+            self.assertEqual(config.raw["agents"]["codex"]["provider"], "codex-cli")
+
+    def test_unknown_key_and_unknown_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _init_repo(root)
+            config = load_config(root)
+            flow = config.default_flow_name
+            out, err = self._silent()
+            with out, err:
+                session._handle_command(root, config, "/set codex banana 1", flow)
+                session._handle_command(root, config, "/set nope model sonnet", flow)
+            self.assertNotIn("banana", config.raw["agents"]["codex"])
+
+
 if __name__ == "__main__":
     unittest.main()
