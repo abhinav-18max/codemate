@@ -58,6 +58,33 @@ codemate run --file task.md
 codemate run --flow codex_heavy "Fix auth tests"
 ```
 
+While a run executes, each step is announced with a banner and the agent's (or
+test command's) output is streamed live to the terminal, so you can see what is
+happening as it happens:
+
+```text
+● plan  (claude · read_only)
+  │ reading repository...
+● implement  (codex · write)
+  │ editing app.py
+  ✓ implement · 1 file(s) touched
+● review  (claude · review_only)
+  ✓ review: pass
+● test  (command group: test)
+  ✓ tests passed
+  ✓ DONE · 1 file(s) changed
+```
+
+Flags:
+
+- `--quiet` suppresses the live progress/streaming (the run still records full
+  artifacts under `.team/runs/<run-id>/`).
+- `--no-color` disables ANSI color. Color is also disabled automatically when
+  stdout is not a TTY or when `NO_COLOR` is set.
+
+`codemate run` exits non-zero when the run does not reach `DONE`, so CI and
+scripts can detect a failed or `NEEDS_HUMAN` run.
+
 The default config requires a clean worktree before starting. This prevents a
 run from mixing agent changes with unrelated user edits.
 

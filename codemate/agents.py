@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,7 @@ class AgentRunInput:
     raw_log_path: Path
     schema_path: Path | None
     config: dict[str, Any]
+    on_output: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -46,11 +49,14 @@ class CodexCliAdapter(AgentAdapter):
             str(input.cwd),
             "--sandbox",
             str(input.config.get("sandbox", "workspace-write")),
-            "--ask-for-approval",
-            str(input.config.get("approval", "never")),
             "--output-last-message",
             str(input.output_path),
         ]
+        # `codex exec` is non-interactive; approvals are governed by config, not a
+        # flag. Keep an opt-in override for environments that need it explicitly.
+        approval_policy = input.config.get("approval_policy")
+        if approval_policy:
+            args.extend(["-c", f"approval_policy={json.dumps(str(approval_policy))}"])
         if input.schema_path and input.schema_path.exists():
             args.extend(["--output-schema", str(input.schema_path)])
         args.append(input.prompt)
@@ -111,21 +117,9 @@ def _claude_permission_mode(mode: str, config: dict[str, Any]) -> str:
 
 def _run_process(args: list[str], input: AgentRunInput) -> AgentRunResult:
     timeout = int(input.config.get("timeout_seconds", 900))
-    with input.raw_log_path.open("w") as raw_log:
-        try:
-            result = subprocess.run(
-                args,
-                cwd=input.cwd,
-                text=True,
-                stdout=raw_log,
-                stderr=subprocess.STDOUT,
-                timeout=timeout,
-                check=False,
-            )
-            exit_code = result.returncode
-        except subprocess.TimeoutExpired:
-            raw_log.write(f"\n[timeout after {timeout} seconds]\n")
-            exit_code = 124
+    exit_code = stream_subprocess(
+        args, input.cwd, input.raw_log_path, timeout, input.on_output
+    )
     if not input.output_path.exists():
         input.output_path.write_text("")
     return AgentRunResult(
@@ -134,6 +128,49 @@ def _run_process(args: list[str], input: AgentRunInput) -> AgentRunResult:
         raw_log_path=input.raw_log_path,
         exit_code=exit_code,
     )
+
+
+def stream_subprocess(
+    args: list[str],
+    cwd: Path,
+    log_path: Path,
+    timeout: int,
+    on_output: Callable[[str], None] | None = None,
+) -> int:
+    """Run a process, teeing its combined output to a log file and an optional
+    live sink. Returns the exit code (124 on timeout)."""
+    proc = subprocess.Popen(
+        args,
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+    )
+    timed_out = False
+
+    def _kill_on_timeout() -> None:
+        nonlocal timed_out
+        timed_out = True
+        proc.kill()
+
+    timer = threading.Timer(timeout, _kill_on_timeout)
+    timer.start()
+    try:
+        with proc, log_path.open("w") as log:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                log.write(line)
+                if on_output is not None:
+                    on_output(line)
+            proc.wait()
+            if timed_out:
+                log.write(f"\n[timeout after {timeout} seconds]\n")
+                if on_output is not None:
+                    on_output(f"[timeout after {timeout} seconds]\n")
+    finally:
+        timer.cancel()
+    return 124 if timed_out else proc.returncode
 
 
 def _require_executable(command: str) -> None:

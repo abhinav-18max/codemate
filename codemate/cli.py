@@ -9,6 +9,7 @@ from pathlib import Path
 from .artifacts import RunState, latest_run_dir
 from .config import init_project, load_config
 from .git_tools import add_and_commit, changed_files, diff, ensure_repo, restore_paths
+from .reporter import Reporter
 from .workflow import run_task
 
 
@@ -27,6 +28,12 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("task", nargs="?")
     run_parser.add_argument("--file")
     run_parser.add_argument("--flow")
+    run_parser.add_argument(
+        "--quiet", action="store_true", help="Suppress live progress and streamed output"
+    )
+    run_parser.add_argument(
+        "--no-color", action="store_true", help="Disable ANSI color in live output"
+    )
 
     status_parser = subparsers.add_parser("status", help="Show run status")
     status_parser.add_argument("--run-id")
@@ -55,10 +62,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run":
             task = _read_task(args)
             config = load_config(root)
-            state = run_task(config, task, args.flow)
+            reporter = Reporter(
+                enabled=not args.quiet,
+                color=False if args.no_color else None,
+            )
+            state = run_task(config, task, args.flow, reporter=reporter)
+            print()
             print(_format_state(state))
             print(f"Run artifacts: .team/runs/{state.run_id}")
-            return 0
+            return 0 if state.status == "DONE" else 2
         if args.command == "status":
             state = _load_state(root, args.run_id)
             print(_format_state(state))
