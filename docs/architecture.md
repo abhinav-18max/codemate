@@ -5,19 +5,33 @@
 ```text
 codemate/
   cli.py          command parsing and user-facing output
+  session.py      interactive REPL session and slash commands
   config.py       team.yml defaults, validation, and init files
   workflow.py     sequential state machine
   agents.py       Codex CLI and Claude Code adapters
   commands.py     deterministic local command runner
+  reporter.py     live progress banners and streamed output
   git_tools.py    git status, branch, diff, and commit helpers
   policy.py       changed-file allow/deny checks
   artifacts.py    run ids, run state, run directories, and locks
   yaml_lite.py    small YAML subset parser used by team.yml
 ```
 
+## Entry Points
+
+There are two ways to drive the same workflow:
+
+- `codemate` (or `codemate chat`) starts an interactive session in `session.py`:
+  a prompt loop where each typed task runs through the flow and slash commands
+  inspect or manage the result.
+- `codemate run "task"` runs a single task non-interactively for scripts and CI.
+
+Both call `workflow.run_task`, passing a `Reporter` that streams step banners and
+agent/command output live while the run still records full artifacts to disk.
+
 ## Run Lifecycle
 
-`codemate run "task"` does this:
+Each task (whether typed in the session or passed to `codemate run`) does this:
 
 1. Load and validate `team.yml`.
 2. Verify the current directory is a git repo.
@@ -31,6 +45,9 @@ codemate/
 10. Run configured local commands.
 11. Run bounded fix cycles when review or commands fail.
 12. Write `final.md` and `state.json`.
+
+Throughout, the `Reporter` prints a banner per step and streams the agent's and
+test command's output to the terminal as it is produced.
 
 ## State File
 
@@ -89,5 +106,6 @@ line interface. The adapters receive:
 - raw log path
 - optional schema path
 - agent-specific config
+- an optional `on_output` callback used to stream output live
 
 The workflow derives changed files and diffs from git, not from agent output.

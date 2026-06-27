@@ -19,6 +19,12 @@ The default flow is:
 plan -> implement -> review -> test
 ```
 
+You usually drive it from an interactive session — run `codemate` with no
+arguments to get a prompt, type tasks to run them, and use slash commands
+(`/status`, `/diff`, `/accept`, `/reset`, ...) to inspect and manage results.
+Each step streams live. `codemate run "task"` does the same thing once, for
+scripts and CI.
+
 There is no parallelism in the MVP. One step is active at a time, every step
 gets a focused prompt, and every run writes neutral artifacts under
 `.team/runs/<run-id>/`.
@@ -36,8 +42,10 @@ Included:
 
 - Project initialization.
 - Config parsing and validation.
+- Interactive session with slash commands.
 - Codex CLI and Claude Code adapters.
 - Sequential plan/implement/review/test execution.
+- Live streaming of step progress and agent/command output.
 - Bounded fix loop.
 - Run state and logs.
 - Git diff and changed-file tracking.

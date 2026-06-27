@@ -12,6 +12,14 @@ plan -> implement -> review -> test
 
 ## Common Commands
 
+Start an interactive session (the usual way to work):
+
+```bash
+codemate            # then type tasks; /help lists slash commands
+```
+
+Or run a single task non-interactively:
+
 ```bash
 codemate doctor
 codemate run "Describe the task"

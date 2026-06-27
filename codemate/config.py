@@ -217,6 +217,11 @@ plan -> implement -> review -> test
 
 ## Daily Commands
 
+Run `codemate` with no arguments to start an interactive session, then type
+tasks and use slash commands (`/help`, `/status`, `/diff`, `/accept`, `/reset`).
+
+For one-off or scripted runs:
+
 ```bash
 codemate doctor
 codemate run "Describe the task"
