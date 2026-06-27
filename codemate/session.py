@@ -4,10 +4,29 @@ import atexit
 import sys
 from pathlib import Path
 
+from . import interactive
 from .config import ConfigError, TeamConfig, load_config, validate_config
 from .git_tools import diff, ensure_repo
 from .reporter import Reporter
 from .workflow import STEP_OVERRIDE_KEYS, WorkflowError, _agent_config_for_step, run_task
+
+COMMANDS = [
+    "/help",
+    "/status",
+    "/diff",
+    "/logs",
+    "/agents",
+    "/steps",
+    "/model",
+    "/effort",
+    "/set",
+    "/unset",
+    "/accept",
+    "/reset",
+    "/flow",
+    "/clear",
+    "/exit",
+]
 
 PROMPT = "\ncodemate› "
 
@@ -33,6 +52,8 @@ HELP = """commands:
   /logs [step]       show logs for the latest run (optionally one step)
   /agents            show agents and their provider/model/effort
   /steps             show each step and the model/effort it will use
+  /model             pick a step/agent and model from a menu
+  /effort            pick a step/agent and effort level from a menu
   /set <t> <k> <v>   set key k on a step id or agent name (model, effort, ...)
   /unset <t> <k>     remove a key from a step id or agent name
   /accept            keep changes in the working tree
@@ -43,6 +64,7 @@ HELP = """commands:
   /exit              quit the session
 
 Type anything else and it runs as a task through the active flow.
+Tip: press TAB to complete a command, or type just "/" for a menu.
 Examples: /set review model sonnet · /set codex effort high · /unset review model"""
 
 
@@ -58,6 +80,7 @@ def run_session(
     reporter = Reporter(enabled=not quiet, color=False if no_color else None)
     flow_name = flow or config.default_flow_name
     _enable_readline(root)
+    interactive.install_completion(COMMANDS)
     _print_banner(root, flow_name)
 
     while True:
@@ -72,6 +95,11 @@ def run_session(
         line = line.strip()
         if not line:
             continue
+        if line == "/":
+            chosen = _palette()
+            if not chosen:
+                continue
+            line = chosen
         if line.startswith("/"):
             stop, flow_name = _handle_command(root, config, line, flow_name)
             if stop:
@@ -125,6 +153,10 @@ def _handle_command(
         _print_agents(config)
     elif cmd == "steps":
         _print_steps(config, flow_name)
+    elif cmd == "model":
+        _cmd_pick(config, flow_name, "model")
+    elif cmd == "effort":
+        _cmd_pick(config, flow_name, "effort")
     elif cmd == "set":
         if len(rest) < 3:
             print("usage: /set <step-id|agent> <key> <value>")
@@ -142,10 +174,11 @@ def _handle_command(
     elif cmd == "reset":
         cli._reset(root, None)
     elif cmd == "flow":
-        if rest:
+        target = rest[0] if rest else _pick_flow(config)
+        if target:
             try:
-                config.flow_steps(rest[0])
-                flow_name = rest[0]
+                config.flow_steps(target)
+                flow_name = target
                 print(f"flow set to {flow_name}")
             except Exception as exc:
                 print(f"codemate: error: {exc}", file=sys.stderr)
@@ -245,6 +278,75 @@ def _unset_config(config: TeamConfig, flow_name: str, target: str, key: str) -> 
         print(f"unset {target}.{key}")
     else:
         print(f"{target} has no '{key}' set")
+
+
+def _palette() -> str | None:
+    options = [
+        ("status   — latest run status", "/status"),
+        ("diff     — current git diff", "/diff"),
+        ("steps    — steps and their models", "/steps"),
+        ("agents   — agent settings", "/agents"),
+        ("model    — set a model", "/model"),
+        ("effort   — set effort level", "/effort"),
+        ("flow     — switch the active flow", "/flow"),
+        ("logs     — latest run logs", "/logs"),
+        ("accept   — keep changes", "/accept"),
+        ("reset    — revert changes", "/reset"),
+        ("help     — all commands", "/help"),
+        ("exit     — quit", "/exit"),
+    ]
+    return interactive.select("commands", options)
+
+
+def _pick_flow(config: TeamConfig) -> str | None:
+    flows = list(config.raw.get("workflow", {}).get("flows", {}).keys())
+    return interactive.select("flow", [(name, name) for name in flows])
+
+
+def _pick_target(config: TeamConfig, flow_name: str) -> str | None:
+    options: list[tuple[str, str]] = []
+    for name in config.raw.get("agents", {}):
+        options.append((f"agent: {name}", name))
+    for step in config.flow_steps(flow_name):
+        if step.get("type") == "agent":
+            options.append((f"step:  {step['id']}", str(step["id"])))
+    return interactive.select("apply to", options)
+
+
+def _model_presets(config: TeamConfig, flow_name: str, target: str) -> list[tuple[str, str]]:
+    kind, obj = _resolve_target(config, flow_name, target)
+    if kind == "agent" and obj is not None:
+        provider = str(obj.get("provider", ""))
+    elif kind == "step" and obj is not None:
+        provider = str(_agent_config_for_step(config, obj).get("provider", ""))
+    else:
+        provider = ""
+    if provider == "claude-code":
+        models = ["claude-opus-4-8", "opus", "sonnet", "haiku", "fable"]
+    elif provider == "codex-cli":
+        models = ["gpt-5.5", "gpt-5-codex", "o3"]
+    else:
+        models = []
+    return [(model, model) for model in models]
+
+
+def _cmd_pick(config: TeamConfig, flow_name: str, key: str) -> None:
+    if not interactive.supports_menus():
+        print(f"interactive menus need a terminal; use /set <target> {key} <value>")
+        return
+    target = _pick_target(config, flow_name)
+    if not target:
+        return
+    if key == "model":
+        options = _model_presets(config, flow_name, target) + [("custom…", "__custom__")]
+    else:
+        options = [(level, level) for level in ("low", "medium", "high", "xhigh", "max")]
+    choice = interactive.select(f"{key} · {target}", options)
+    if choice is None:
+        return
+    value = interactive.prompt_text(f"{key}: ") if choice == "__custom__" else choice
+    if value:
+        _set_config(config, flow_name, target, key, value)
 
 
 def _print_banner(root: Path, flow_name: str) -> None:

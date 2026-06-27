@@ -44,6 +44,20 @@ Settable keys: `model`, `effort` (alias `reasoning_effort`), `provider`,
 `sandbox`, `output_format`, `command`, `timeout_seconds`. Changes apply to
 subsequent runs in this session; they are not written back to `team.yml`.
 
+### Navigating interactively
+
+On a real terminal the session is keyboard-driven like other modern CLIs:
+
+- Press **TAB** to complete a slash command (e.g. `/fl` → `/flow`).
+- Type just **`/`** and press enter to open a **command menu** you arrow through.
+- **`/model`** and **`/effort`** open pickers: choose a step or agent, then pick a
+  value from a list (with a "custom…" option for models). **`/flow`** with no
+  argument lists the available flows.
+
+Use ↑/↓ (or `j`/`k`) to move, **enter** to select, **esc** (or `q`) to cancel.
+When stdout is not a terminal (pipes, CI) these fall back to typed input, so
+`/set` always works without a menu.
+
 `chat` accepts `--flow`, `--quiet`, and `--no-color`. Because each task runs on
 its own branch and leaves changes in the working tree, run `/accept` or `/reset`
 before starting the next task (the clean-worktree guard will remind you).
