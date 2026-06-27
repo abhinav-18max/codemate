@@ -21,6 +21,11 @@ class YamlLiteTests(unittest.TestCase):
             "fix_if_needed",
         ])
         self.assertEqual(data["commands"]["test"], [])
+        # Default models/effort ship active (inline comments are stripped).
+        self.assertEqual(data["agents"]["claude"]["model"], "claude-opus-4-8")
+        self.assertEqual(data["agents"]["claude"]["effort"], "high")
+        self.assertEqual(data["agents"]["codex"]["model"], "gpt-5.5")
+        self.assertEqual(data["agents"]["codex"]["reasoning_effort"], "high")
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ During a run, the CLI writes:
 .team/lock.json
 ```
 
-This prevents two `team run` processes from mutating the same repo at once. The
+This prevents two `codemate run` processes from mutating the same repo at once. The
 lock records the process id and creation time. If the process no longer exists,
 the next run can clear the stale lock.
 
@@ -47,6 +47,20 @@ Write-capable steps are checked after completion:
 - changed files must not match `deny_paths`
 - changed file count must be under `limits.max_changed_files`
 - diff line count must be under `limits.max_diff_lines`
+
+## Review Gate Fails Closed
+
+The review step only passes on an explicit, machine-parseable pass decision. The
+review agent is asked to end its response with a JSON object:
+
+```json
+{"decision": "pass" | "fail", "blocking_findings": ["..."]}
+```
+
+The CLI also accepts a trailing `decision:`/`status:`/`verdict:` marker line. If
+the output is empty, truncated, or states no clear decision, the run treats it as
+a failure and routes to the fix loop (and ultimately `NEEDS_HUMAN`) rather than
+silently approving unreviewed changes.
 
 ## Tests
 

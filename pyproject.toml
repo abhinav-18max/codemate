@@ -1,16 +1,46 @@
 [project]
-name = "codemate"
-version = "0.1.0"
-description = "Sequential AI development team runner"
+name = "codemate-team"
+version = "0.2.0"
+description = "A deterministic supervisor that runs Claude Code and Codex CLI through a Plan -> Implement -> Review -> Test workflow"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Abhinav" }]
+keywords = [
+    "ai",
+    "agents",
+    "claude",
+    "codex",
+    "cli",
+    "developer-tools",
+    "automation",
+    "code-review",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Utilities",
+]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/abhinav-18max/codemate"
+Repository = "https://github.com/abhinav-18max/codemate"
+Issues = "https://github.com/abhinav-18max/codemate/issues"
+
 [project.scripts]
-team = "codemate.cli:main"
+codemate = "codemate.cli:main"
 
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

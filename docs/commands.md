@@ -3,16 +3,72 @@
 All commands accept `--root` to operate on a specific project root:
 
 ```bash
-team --root /path/to/repo status
+codemate --root /path/to/repo status
 ```
 
-## `team init`
+## `codemate` (interactive session)
+
+Running `codemate` with no command (or `codemate chat`) starts an interactive
+session, like a REPL. Type a task at the prompt to run it through the active
+flow; each step streams live. Slash commands inspect and manage the result
+without leaving the session:
+
+```text
+codemate› Add rate limiting to login
+● plan  (claude · read_only)
+  │ ...
+  ✓ DONE · 3 file(s) changed
+
+codemate› /diff
+codemate› /accept commit "Add login rate limiting"
+codemate› /exit
+```
+
+Available slash commands: `/help`, `/status`, `/diff`, `/logs [step]`,
+`/agents`, `/steps`, `/set`, `/unset`, `/accept [commit <msg>]`, `/reset`,
+`/flow [name]`, `/clear`, `/exit`.
+
+`/agents` and `/steps` show the provider/model/effort each agent and step will
+use. `/set <target> <key> <value>` tunes them on the fly, where `<target>` is
+an agent name (affects every step using it) or a step id (an override for just
+that step):
+
+```text
+codemate› /set review model sonnet     # cheaper model for the review step only
+codemate› /set codex effort low        # lower effort for all codex steps
+codemate› /steps                       # confirm the effective settings
+codemate› /unset review model          # drop the per-step override
+```
+
+Settable keys: `model`, `effort` (alias `reasoning_effort`), `provider`,
+`sandbox`, `output_format`, `command`, `timeout_seconds`. Changes apply to
+subsequent runs in this session; they are not written back to `team.yml`.
+
+### Navigating interactively
+
+On a real terminal the session is keyboard-driven like other modern CLIs:
+
+- Press **TAB** to complete a slash command (e.g. `/fl` → `/flow`).
+- Type just **`/`** and press enter to open a **command menu** you arrow through.
+- **`/model`** and **`/effort`** open pickers: choose a step or agent, then pick a
+  value from a list (with a "custom…" option for models). **`/flow`** with no
+  argument lists the available flows.
+
+Use ↑/↓ (or `j`/`k`) to move, **enter** to select, **esc** (or `q`) to cancel.
+When stdout is not a terminal (pipes, CI) these fall back to typed input, so
+`/set` always works without a menu.
+
+`chat` accepts `--flow`, `--quiet`, and `--no-color`. Because each task runs on
+its own branch and leaves changes in the working tree, run `/accept` or `/reset`
+before starting the next task (the clean-worktree guard will remind you).
+
+## `codemate init`
 
 Creates the default project contract and local harness files.
 
 ```bash
-team init
-team init --force
+codemate init
+codemate init --force
 ```
 
 Creates:
@@ -35,83 +91,155 @@ It also updates `.gitignore` with:
 Use `--force` only when you intentionally want to overwrite generated config,
 prompts, schemas, and the generated project docs.
 
-## `team doctor`
+After writing the files, `init` checks that each agent CLI is installed and
+logged in (Claude Code via `claude auth status`, Codex via `codex login
+status`). If one is missing it prints the install command; if it is installed
+but not signed in, it offers to run the login flow for you. Pass `--skip-setup`
+to bypass this (e.g. in CI).
+
+## `codemate setup`
+
+Re-runs the agent install/login check on its own:
+
+```bash
+codemate setup          # prompts before launching any login
+codemate setup --yes    # run pending logins without prompting
+```
+
+It exits non-zero if an agent is missing or not logged in, so it is safe to use
+as a precondition check.
+
+## `codemate clean`
+
+Deletes codemate files. By default it removes only run artifacts:
+
+```bash
+codemate clean          # delete .team/runs/, .team/lock.json, .team/history
+codemate clean --all    # also delete team.yml, .team/, docs/team.md, gitignore entries
+codemate clean --all --yes   # skip the confirmation prompt
+```
+
+`--all` is the full uninstall from a project: it removes every file `init`
+created and strips the codemate entries from `.gitignore`. You are asked to
+confirm unless `--yes` is given.
+
+## `codemate update`
+
+Upgrades the installed `codemate-team` package to the latest release, using
+whichever installer manages it (uv tool, pipx, or pip):
+
+```bash
+codemate update          # upgrade in place
+codemate update --check  # just report installed vs latest on PyPI
+```
+
+After upgrading, run `codemate init --force` if you also want to refresh the
+generated prompts/schemas/templates in a project.
+
+## `codemate doctor`
 
 Checks that configured agent commands exist and that simple command-group
 executables can be found.
 
 ```bash
-team doctor
-team doctor --flow plan_implement_review_test
+codemate doctor
+codemate doctor --flow plan_implement_review_test
 ```
 
 Empty command groups are warnings, not failures. This allows a project to
 bootstrap before test commands are configured.
 
-## `team run`
+## `codemate run`
 
 Runs a task through the configured workflow.
 
 ```bash
-team run "Add rate limiting to login"
-team run --file task.md
-team run --flow codex_heavy "Fix auth tests"
+codemate run "Add rate limiting to login"
+codemate run --file task.md
+codemate run --flow codex_heavy "Fix auth tests"
 ```
+
+While a run executes, each step is announced with a banner and the agent's (or
+test command's) output is streamed live to the terminal, so you can see what is
+happening as it happens:
+
+```text
+● plan  (claude · read_only)
+  │ reading repository...
+● implement  (codex · write)
+  │ editing app.py
+  ✓ implement · 1 file(s) touched
+● review  (claude · review_only)
+  ✓ review: pass
+● test  (command group: test)
+  ✓ tests passed
+  ✓ DONE · 1 file(s) changed
+```
+
+Flags:
+
+- `--quiet` suppresses the live progress/streaming (the run still records full
+  artifacts under `.team/runs/<run-id>/`).
+- `--no-color` disables ANSI color. Color is also disabled automatically when
+  stdout is not a TTY or when `NO_COLOR` is set.
+
+`codemate run` exits non-zero when the run does not reach `DONE`, so CI and
+scripts can detect a failed or `NEEDS_HUMAN` run.
 
 The default config requires a clean worktree before starting. This prevents a
 run from mixing agent changes with unrelated user edits.
 
-## `team status`
+## `codemate status`
 
 Shows the latest run status or a specific run.
 
 ```bash
-team status
-team status --run-id 2026-06-26T10-15-00-123456
+codemate status
+codemate status --run-id 2026-06-26T10-15-00-123456
 ```
 
-## `team logs`
+## `codemate logs`
 
 Prints logs or outputs recorded for a run.
 
 ```bash
-team logs
-team logs --step implement
-team logs --run-id 2026-06-26T10-15-00-123456
+codemate logs
+codemate logs --step implement
+codemate logs --run-id 2026-06-26T10-15-00-123456
 ```
 
 Agent steps prefer raw logs. Command steps print their command log.
 
-## `team diff`
+## `codemate diff`
 
 Prints the current git diff.
 
 ```bash
-team diff
+codemate diff
 ```
 
 This uses git directly. It does not trust agent summaries.
 
-## `team accept`
+## `codemate accept`
 
 Accepts the latest run.
 
 ```bash
-team accept
-team accept --commit
-team accept --commit --message "Fix checkout test"
+codemate accept
+codemate accept --commit
+codemate accept --commit --message "Fix checkout test"
 ```
 
 Without `--commit`, this only acknowledges the run and leaves changes in the
 working tree. With `--commit`, it commits non-`.team/` changed files.
 
-## `team reset`
+## `codemate reset`
 
 Restores source files recorded in the latest run state.
 
 ```bash
-team reset
-team reset --run-id 2026-06-26T10-15-00-123456
+codemate reset
+codemate reset --run-id 2026-06-26T10-15-00-123456
 ```
 
 This is scoped to files recorded in the run state and excludes `.team/`

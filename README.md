@@ -11,16 +11,28 @@ Plan -> Implement -> Review -> Test
 The CLI owns sequencing, git state, run artifacts, local test execution, and
 policy checks. Agent CLIs only receive one bounded role at a time.
 
-## Install for Local Development
+## Install
+
+The PyPI distribution is `codemate-team`; it installs a `codemate` command.
+
+As a global CLI tool (recommended):
 
 ```bash
-uv run --with-editable . team --help
+uv tool install codemate-team
+# or: pipx install codemate-team
+codemate --help
 ```
 
-After packaging or installing normally, the command is:
+Run once without installing:
 
 ```bash
-team --help
+uvx --from codemate-team codemate --help
+```
+
+For local development from a checkout:
+
+```bash
+uv run --with-editable . codemate --help
 ```
 
 ## Quick Start
@@ -28,39 +40,76 @@ team --help
 Initialize a repo:
 
 ```bash
-team init
+codemate init
 ```
 
 Review and edit `team.yml`, then check local prerequisites:
 
 ```bash
-team doctor
+codemate doctor
 ```
 
-Run a task:
+Start an interactive session (run `codemate` with no arguments):
 
 ```bash
-team run "Fix the flaky checkout test"
+codemate
 ```
 
-Inspect results:
+```text
+codemate · interactive session
+repo: my-project   flow: plan_implement_review_test
+type a task and press enter · /help for commands · /exit to quit
+
+codemate› Fix the flaky checkout test
+● plan  (claude · read_only)
+  │ ...streamed agent output...
+● implement  (codex · write)
+  ✓ implement · 2 file(s) touched
+● review  (claude · review_only)
+  ✓ review: pass
+● test  (command group: test)
+  ✓ tests passed
+  ✓ DONE · 2 file(s) changed
+```
+
+Inside the session you type tasks to run them, and use slash commands to inspect
+and manage the result:
+
+```text
+/status            show the latest run status
+/diff              show the current git diff
+/logs [step]       show logs for the latest run
+/accept            keep changes (or: /accept commit "message")
+/reset             revert files changed by the latest run
+/flow [name]       show or switch the active flow
+/help              list all commands
+/exit              quit
+```
+
+For scripts and CI, run a single task non-interactively:
 
 ```bash
-team status
-team logs --step implement
-team diff
+codemate run "Fix the flaky checkout test"
+codemate status
+codemate logs --step implement
+codemate diff
+codemate accept --commit --message "Fix flaky checkout test"
+codemate reset
 ```
 
-Accept or reset:
+Maintenance:
 
 ```bash
-team accept --commit --message "Fix flaky checkout test"
-team reset
+codemate setup          # check agent CLIs are installed and logged in
+codemate update         # upgrade codemate-team to the latest release
+codemate clean          # delete run artifacts (or --all to remove everything)
 ```
+
+`codemate init` also runs the agent install/login check automatically.
 
 ## Generated Project Files
 
-`team init` creates:
+`codemate init` creates:
 
 ```text
 team.yml

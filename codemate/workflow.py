@@ -8,6 +8,7 @@ from .agents import AgentRunInput, adapter_for
 from .artifacts import RunArtifacts, RunLock, RunState, new_run_id
 from .commands import run_command_group
 from .config import TeamConfig
+from .reporter import Reporter
 from .git_tools import (
     changed_files,
     create_branch,
@@ -24,8 +25,14 @@ class WorkflowError(RuntimeError):
     pass
 
 
-def run_task(config: TeamConfig, task: str, flow_name: str | None = None) -> RunState:
+def run_task(
+    config: TeamConfig,
+    task: str,
+    flow_name: str | None = None,
+    reporter: Reporter | None = None,
+) -> RunState:
     root = config.root
+    reporter = reporter or Reporter(enabled=False)
     ensure_repo(root)
     if config.git_value("require_clean_worktree", True) and not is_clean(root):
         raise WorkflowError("Working tree must be clean before starting a run.")
@@ -47,25 +54,32 @@ def run_task(config: TeamConfig, task: str, flow_name: str | None = None) -> Run
     )
     artifacts.write_text("task.md", task + "\n")
     artifacts.write_state(state)
+    reporter.run_header(run_id, flow, task)
 
     with RunLock(root, run_id):
         try:
             if config.git_value("strategy", "branch") == "branch":
                 create_branch(root, branch)
+                reporter.info(f"branch {branch}")
             steps = config.flow_steps(flow)
-            _run_main_flow(config, artifacts, state, steps)
+            _run_main_flow(config, artifacts, state, steps, reporter)
         except Exception as exc:
             try:
                 state.changed_files = _source_changed_files(config)
             except Exception:
                 pass
             _finish_needs_human(artifacts, state, str(exc))
+            reporter.failure(str(exc))
             raise
     return state
 
 
 def _run_main_flow(
-    config: TeamConfig, artifacts: RunArtifacts, state: RunState, steps: list[dict[str, Any]]
+    config: TeamConfig,
+    artifacts: RunArtifacts,
+    state: RunState,
+    steps: list[dict[str, Any]],
+    reporter: Reporter,
 ) -> None:
     plan = _require_step(steps, "plan")
     implement = _require_step(steps, "implement")
@@ -74,23 +88,26 @@ def _run_main_flow(
     fix = _find_step(steps, "fix_if_needed") or implement
     max_retries = int(fix.get("max_retries", config.limit("max_fix_retries", 2)))
 
-    _agent_step(config, artifacts, state, plan, "PLANNING", "PLANNED")
-    _agent_step(config, artifacts, state, implement, "IMPLEMENTING", "IMPLEMENTED")
+    _agent_step(config, artifacts, state, plan, "PLANNING", "PLANNED", reporter)
+    _agent_step(config, artifacts, state, implement, "IMPLEMENTING", "IMPLEMENTED", reporter)
 
     attempts = 0
     while True:
-        review_passed = _review_step(config, artifacts, state, review)
+        review_passed, review_reason = _review_step(config, artifacts, state, review, reporter)
         if review_passed:
             break
         if attempts >= max_retries:
-            _finish_needs_human(artifacts, state, "Review failed after max fix attempts")
+            _finish_needs_human(
+                artifacts, state, review_reason or "Review failed after max fix attempts"
+            )
+            reporter.failure(review_reason or "Review failed after max fix attempts")
             return
         attempts += 1
-        _fix_step(config, artifacts, state, fix, attempts)
+        _fix_step(config, artifacts, state, fix, attempts, reporter)
 
     attempts = 0
     while True:
-        tests_passed = _test_step(config, artifacts, state, test)
+        tests_passed = _test_step(config, artifacts, state, test, reporter)
         if tests_passed:
             state.status = "DONE"
             state.current_step = None
@@ -98,15 +115,20 @@ def _run_main_flow(
             state.changed_files = _source_changed_files(config)
             artifacts.write_text("final.md", _final_report(state))
             artifacts.write_state(state)
+            reporter.success(f"DONE · {len(state.changed_files)} file(s) changed")
             return
         if attempts >= max_retries:
             _finish_needs_human(artifacts, state, "Tests failed after max fix attempts")
+            reporter.failure("Tests failed after max fix attempts")
             return
         attempts += 1
-        _fix_step(config, artifacts, state, fix, attempts)
-        review_passed = _review_step(config, artifacts, state, review)
+        _fix_step(config, artifacts, state, fix, attempts, reporter)
+        review_passed, review_reason = _review_step(config, artifacts, state, review, reporter)
         if not review_passed and attempts >= max_retries:
-            _finish_needs_human(artifacts, state, "Review failed during test fix loop")
+            _finish_needs_human(
+                artifacts, state, review_reason or "Review failed during test fix loop"
+            )
+            reporter.failure(review_reason or "Review failed during test fix loop")
             return
 
 
@@ -117,6 +139,7 @@ def _agent_step(
     step: dict[str, Any],
     running_status: str,
     success_status: str,
+    reporter: Reporter,
 ) -> Path:
     state.status = running_status
     state.current_step = str(step["id"])
@@ -132,7 +155,12 @@ def _agent_step(
     schema_path = config.root / ".team" / "schemas" / f"{output_name}.schema.json"
 
     agent_name = str(step["agent"])
-    agent_config = config.agent(agent_name)
+    agent_config = _agent_config_for_step(config, step)
+    mode = str(step.get("mode", "read_only"))
+    detail = " · ".join(
+        part for part in (agent_name, agent_config.get("model"), mode) if part
+    )
+    reporter.step(str(step["id"]), detail)
     adapter = adapter_for(agent_config)
     result = adapter.run(
         AgentRunInput(
@@ -140,12 +168,13 @@ def _agent_step(
             step_id=str(step["id"]),
             cwd=config.root,
             prompt=prompt_path.read_text(),
-            mode=str(step.get("mode", "read_only")),
+            mode=mode,
             expected_output=output_name,
             output_path=output_path,
             raw_log_path=raw_log_path,
             schema_path=schema_path,
             config=agent_config,
+            on_output=reporter.stream_line,
         )
     )
 
@@ -180,33 +209,61 @@ def _agent_step(
     )
     artifacts.write_state(state)
     if not result.ok:
+        reporter.failure(f"{step['id']} failed (exit {result.exit_code})")
         raise WorkflowError(f"Agent step failed: {step['id']}")
+    if step.get("mode") == "write":
+        reporter.success(f"{step['id']} · {len(source_files)} file(s) touched")
+    else:
+        reporter.success(f"{step['id']} complete")
     return output_path
 
 
 def _review_step(
-    config: TeamConfig, artifacts: RunArtifacts, state: RunState, step: dict[str, Any]
-) -> bool:
-    output_path = _agent_step(config, artifacts, state, step, "REVIEWING", "REVIEWED")
+    config: TeamConfig,
+    artifacts: RunArtifacts,
+    state: RunState,
+    step: dict[str, Any],
+    reporter: Reporter,
+) -> tuple[bool, str | None]:
+    output_path = _agent_step(
+        config, artifacts, state, step, "REVIEWING", "REVIEWED", reporter
+    )
     output = output_path.read_text(errors="replace")
-    passed = _review_passed(output)
+    passed, reason = _review_verdict(output)
     state.status = "REVIEW_PASSED" if passed else "REVIEW_FAILED"
     artifacts.write_state(state)
-    return passed
+    if passed:
+        reporter.success("review: pass")
+    else:
+        reporter.note(f"review: fail — {reason}")
+    return passed, reason
 
 
 def _test_step(
-    config: TeamConfig, artifacts: RunArtifacts, state: RunState, step: dict[str, Any]
+    config: TeamConfig,
+    artifacts: RunArtifacts,
+    state: RunState,
+    step: dict[str, Any],
+    reporter: Reporter,
 ) -> bool:
     state.status = "TESTING"
     state.current_step = str(step["id"])
     artifacts.write_state(state)
     group = str(step.get("command_group", "test"))
     commands = config.command_group(group)
+    reporter.step("test", f"command group: {group}")
     log_path = artifacts.dir / "test.log"
     ok, failed_command, exit_code = run_command_group(
-        config.root, commands, log_path, timeout_seconds=config.limit("command_timeout_seconds", 900)
+        config.root,
+        commands,
+        log_path,
+        timeout_seconds=config.limit("command_timeout_seconds", 900),
+        on_output=reporter.stream_line,
     )
+    if ok:
+        reporter.success("tests passed")
+    else:
+        reporter.note(f"tests failed: {failed_command} (exit {exit_code})")
     state.status = "TEST_PASSED" if ok else "TEST_FAILED"
     state.current_step = None
     state.steps.append(
@@ -231,12 +288,13 @@ def _fix_step(
     state: RunState,
     step: dict[str, Any],
     attempt: int,
+    reporter: Reporter,
 ) -> None:
     fix_step = dict(step)
     fix_step["id"] = f"fix_{attempt}"
     fix_step["output"] = f"fix_{attempt}"
     fix_step["mode"] = "write"
-    _agent_step(config, artifacts, state, fix_step, "FIXING", "IMPLEMENTED")
+    _agent_step(config, artifacts, state, fix_step, "FIXING", "IMPLEMENTED", reporter)
 
 
 def _render_prompt(
@@ -260,35 +318,88 @@ def _render_prompt(
     return template
 
 
-def _review_passed(output: str) -> bool:
-    stripped = output.strip()
-    if stripped.startswith("{"):
+_PASS_DECISIONS = {"pass", "passed", "approve", "approved", "success", "lgtm"}
+_FAIL_DECISIONS = {
+    "fail",
+    "failed",
+    "reject",
+    "rejected",
+    "changes_requested",
+    "blocking",
+    "block",
+}
+
+
+def _review_verdict(output: str) -> tuple[bool, str | None]:
+    """Decide whether a review passed, failing closed when undetermined.
+
+    A review only passes on an explicit, machine-parseable pass decision. Empty,
+    truncated, or ambiguous output is treated as a failure so it surfaces to a
+    human instead of silently approving unreviewed changes.
+    """
+    decision = _extract_decision(output)
+    if decision == "pass":
+        return True, None
+    if decision == "fail":
+        return False, "Review returned a blocking decision"
+    return False, "Review decision could not be determined (failing closed)"
+
+
+def _extract_decision(output: str) -> str | None:
+    text = output.strip()
+    if not text:
+        return None
+    for candidate in _json_candidates(text):
         try:
-            data = json.loads(stripped)
+            data = json.loads(candidate)
         except json.JSONDecodeError:
-            data = {}
-        decision = str(data.get("decision", data.get("status", ""))).lower()
-        if decision in {"pass", "passed", "approved", "success"}:
-            return True
-        if decision in {"fail", "failed", "changes_requested", "blocking"}:
-            return False
-    lowered = output.lower()
-    pass_markers = [
-        "decision: pass",
-        "decision: passed",
-        "status: pass",
-        "status: passed",
-    ]
-    if any(marker in lowered for marker in pass_markers):
-        return True
-    failure_markers = [
-        "decision: fail",
-        "decision: failed",
-        "status: changes_requested",
-        "changes_requested",
-        "blocking",
-    ]
-    return not any(marker in lowered for marker in failure_markers)
+            continue
+        if isinstance(data, dict):
+            mapped = _map_decision(str(data.get("decision", data.get("status", ""))))
+            if mapped:
+                return mapped
+    # Fall back to an explicit marker line; the last stated decision wins.
+    for line in reversed(text.splitlines()):
+        lowered = line.strip().lower()
+        for key in ("decision:", "status:", "verdict:"):
+            if lowered.startswith(key):
+                mapped = _map_decision(lowered[len(key):])
+                if mapped:
+                    return mapped
+    return None
+
+
+def _json_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    if text.startswith("{") and text.endswith("}"):
+        candidates.append(text)
+    depth = 0
+    start = -1
+    for index, char in enumerate(text):
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start != -1:
+                candidates.append(text[start : index + 1])
+                start = -1
+    # Prefer the last balanced object (closest to the agent's final answer).
+    candidates.reverse()
+    return candidates
+
+
+def _map_decision(value: str) -> str | None:
+    token = value.strip().strip(".\"'").lower()
+    if not token:
+        return None
+    first = token.replace("-", "_").split()[0]
+    if first in _PASS_DECISIONS or token in _PASS_DECISIONS:
+        return "pass"
+    if first in _FAIL_DECISIONS or token in _FAIL_DECISIONS:
+        return "fail"
+    return None
 
 
 def _source_changed_files(config: TeamConfig) -> list[str]:
@@ -332,6 +443,37 @@ Branch: {state.branch}
 Changed files:
 {changed}
 """
+
+
+STEP_OVERRIDE_KEYS = (
+    "provider",
+    "command",
+    "model",
+    "effort",
+    "reasoning_effort",
+    "sandbox",
+    "output_format",
+    "extra_args",
+    "timeout_seconds",
+    "approval_policy",
+    "write_permission_mode",
+)
+
+
+def _agent_config_for_step(config: TeamConfig, step: dict[str, Any]) -> dict[str, Any]:
+    """Agent config for a step, with any step-level keys overlaid on top.
+
+    This lets a single step pin its own model/effort/provider without defining a
+    separate agent, e.g. a cheap model for plan/review and a stronger one for
+    implement.
+    """
+    agent_config = config.agent(str(step["agent"]))
+    overrides = {key: step[key] for key in STEP_OVERRIDE_KEYS if key in step}
+    if not overrides:
+        return agent_config
+    merged = dict(agent_config)
+    merged.update(overrides)
+    return merged
 
 
 def _find_step(steps: list[dict[str, Any]], step_id: str) -> dict[str, Any] | None:

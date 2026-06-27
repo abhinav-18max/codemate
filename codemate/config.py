@@ -62,6 +62,8 @@ agents:
     command: claude
     default_mode: plan
     timeout_seconds: 900
+    model: claude-opus-4-8    # opus | sonnet | haiku | fable | full model id
+    effort: high              # low | medium | high | xhigh | max
   codex:
     provider: codex-cli
     command: codex
@@ -69,6 +71,8 @@ agents:
     timeout_seconds: 900
     sandbox: workspace-write
     approval: never
+    model: gpt-5.5
+    reasoning_effort: high    # low | medium | high
 
 commands:
   test: []
@@ -148,7 +152,10 @@ Rules:
 - Do not edit files.
 - Review correctness, missed edge cases, security, tests, and maintainability.
 - Return blocking and non-blocking findings.
-- Give a final decision: pass or fail.
+- Decide "fail" if there is any blocking finding or you cannot complete the review.
+
+End your response with a final line containing only a JSON object and nothing else:
+{"decision": "pass" | "fail", "blocking_findings": ["..."]}
 """,
     "fix.md": """You are the fix agent.
 
@@ -173,7 +180,16 @@ Rules:
 SCHEMAS = {
     "plan.schema.json": '{"type":"object"}\n',
     "implementation.schema.json": '{"type":"object"}\n',
-    "review.schema.json": '{"type":"object"}\n',
+    "review.schema.json": (
+        '{\n'
+        '  "type": "object",\n'
+        '  "required": ["decision"],\n'
+        '  "properties": {\n'
+        '    "decision": {"type": "string", "enum": ["pass", "fail"]},\n'
+        '    "blocking_findings": {"type": "array", "items": {"type": "string"}}\n'
+        '  }\n'
+        '}\n'
+    ),
 }
 
 
@@ -186,7 +202,7 @@ GITIGNORE_PATTERNS = [
 PROJECT_DOCS = {
     "team.md": """# Team CLI
 
-This project uses `team` as a sequential AI development harness.
+This project uses `codemate` as a sequential AI development harness.
 
 The CLI owns the workflow. Agent CLIs such as Codex and Claude Code are treated
 as single-step workers. Local commands and git remain the source of truth.
@@ -205,14 +221,19 @@ plan -> implement -> review -> test
 
 ## Daily Commands
 
+Run `codemate` with no arguments to start an interactive session, then type
+tasks and use slash commands (`/help`, `/status`, `/diff`, `/accept`, `/reset`).
+
+For one-off or scripted runs:
+
 ```bash
-team doctor
-team run "Describe the task"
-team status
-team logs --step implement
-team diff
-team accept --commit --message "Describe accepted changes"
-team reset
+codemate doctor
+codemate run "Describe the task"
+codemate status
+codemate logs --step implement
+codemate diff
+codemate accept --commit --message "Describe accepted changes"
+codemate reset
 ```
 
 ## Important Safety Rules
@@ -279,7 +300,7 @@ class TeamConfig:
 def load_config(root: Path) -> TeamConfig:
     config_path = root / "team.yml"
     if not config_path.exists():
-        raise FileNotFoundError("team.yml not found. Run `team init` first.")
+        raise FileNotFoundError("team.yml not found. Run `codemate init` first.")
     raw = load_yaml(config_path)
     validate_config(raw)
     return TeamConfig(root=root, raw=raw)
@@ -311,6 +332,14 @@ def validate_config(raw: dict[str, Any]) -> None:
             raise ConfigError(f"agents.{name}.provider is unsupported: {provider}")
         if not isinstance(agent.get("command"), str) or not agent["command"]:
             raise ConfigError(f"agents.{name}.command must be a non-empty string")
+        for key in ("model", "effort", "reasoning_effort"):
+            if key in agent and not isinstance(agent[key], str):
+                raise ConfigError(f"agents.{name}.{key} must be a string")
+        extra = agent.get("extra_args")
+        if extra is not None and not isinstance(extra, (str, list)):
+            raise ConfigError(f"agents.{name}.extra_args must be a string or list")
+        if isinstance(extra, list) and not all(isinstance(item, str) for item in extra):
+            raise ConfigError(f"agents.{name}.extra_args entries must be strings")
 
     for flow_name, flow in flows.items():
         if not isinstance(flow, dict):
