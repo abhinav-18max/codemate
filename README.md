@@ -49,23 +49,50 @@ Review and edit `team.yml`, then check local prerequisites:
 codemate doctor
 ```
 
-Run a task:
+Start an interactive session (run `codemate` with no arguments):
+
+```bash
+codemate
+```
+
+```text
+codemate · interactive session
+repo: my-project   flow: plan_implement_review_test
+type a task and press enter · /help for commands · /exit to quit
+
+codemate› Fix the flaky checkout test
+● plan  (claude · read_only)
+  │ ...streamed agent output...
+● implement  (codex · write)
+  ✓ implement · 2 file(s) touched
+● review  (claude · review_only)
+  ✓ review: pass
+● test  (command group: test)
+  ✓ tests passed
+  ✓ DONE · 2 file(s) changed
+```
+
+Inside the session you type tasks to run them, and use slash commands to inspect
+and manage the result:
+
+```text
+/status            show the latest run status
+/diff              show the current git diff
+/logs [step]       show logs for the latest run
+/accept            keep changes (or: /accept commit "message")
+/reset             revert files changed by the latest run
+/flow [name]       show or switch the active flow
+/help              list all commands
+/exit              quit
+```
+
+For scripts and CI, run a single task non-interactively:
 
 ```bash
 codemate run "Fix the flaky checkout test"
-```
-
-Inspect results:
-
-```bash
 codemate status
 codemate logs --step implement
 codemate diff
-```
-
-Accept or reset:
-
-```bash
 codemate accept --commit --message "Fix flaky checkout test"
 codemate reset
 ```

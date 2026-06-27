@@ -14,9 +14,17 @@ from .workflow import run_task
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="codemate")
+    parser = argparse.ArgumentParser(
+        prog="codemate",
+        description="Run codemate with no command to start an interactive session.",
+    )
     parser.add_argument("--root", default=".", help="Project root")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command")
+
+    chat_parser = subparsers.add_parser("chat", help="Start an interactive session (default)")
+    chat_parser.add_argument("--flow")
+    chat_parser.add_argument("--quiet", action="store_true")
+    chat_parser.add_argument("--no-color", action="store_true")
 
     init_parser = subparsers.add_parser("init", help="Create team.yml and .team files")
     init_parser.add_argument("--force", action="store_true")
@@ -55,6 +63,15 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root).resolve()
 
     try:
+        if args.command is None or args.command == "chat":
+            from .session import run_session
+
+            return run_session(
+                root,
+                flow=getattr(args, "flow", None),
+                quiet=getattr(args, "quiet", False),
+                no_color=getattr(args, "no_color", False),
+            )
         if args.command == "init":
             return _init(root, args.force)
         if args.command == "doctor":

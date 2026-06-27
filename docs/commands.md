@@ -6,6 +6,31 @@ All commands accept `--root` to operate on a specific project root:
 codemate --root /path/to/repo status
 ```
 
+## `codemate` (interactive session)
+
+Running `codemate` with no command (or `codemate chat`) starts an interactive
+session, like a REPL. Type a task at the prompt to run it through the active
+flow; each step streams live. Slash commands inspect and manage the result
+without leaving the session:
+
+```text
+codemate› Add rate limiting to login
+● plan  (claude · read_only)
+  │ ...
+  ✓ DONE · 3 file(s) changed
+
+codemate› /diff
+codemate› /accept commit "Add login rate limiting"
+codemate› /exit
+```
+
+Available slash commands: `/help`, `/status`, `/diff`, `/logs [step]`,
+`/accept [commit <msg>]`, `/reset`, `/flow [name]`, `/clear`, `/exit`.
+
+`chat` accepts `--flow`, `--quiet`, and `--no-color`. Because each task runs on
+its own branch and leaves changes in the working tree, run `/accept` or `/reset`
+before starting the next task (the clean-worktree guard will remind you).
+
 ## `codemate init`
 
 Creates the default project contract and local harness files.
