@@ -1,6 +1,6 @@
 [project]
 name = "codemate-team"
-version = "0.1.0"
+version = "0.2.0"
 description = "A deterministic supervisor that runs Claude Code and Codex CLI through a Plan -> Implement -> Review -> Test workflow"
 readme = "README.md"
 requires-python = ">=3.12"

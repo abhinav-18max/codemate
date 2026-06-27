@@ -97,6 +97,16 @@ codemate accept --commit --message "Fix flaky checkout test"
 codemate reset
 ```
 
+Maintenance:
+
+```bash
+codemate setup          # check agent CLIs are installed and logged in
+codemate update         # upgrade codemate-team to the latest release
+codemate clean          # delete run artifacts (or --all to remove everything)
+```
+
+`codemate init` also runs the agent install/login check automatically.
+
 ## Generated Project Files
 
 `codemate init` creates:

@@ -91,6 +91,51 @@ It also updates `.gitignore` with:
 Use `--force` only when you intentionally want to overwrite generated config,
 prompts, schemas, and the generated project docs.
 
+After writing the files, `init` checks that each agent CLI is installed and
+logged in (Claude Code via `claude auth status`, Codex via `codex login
+status`). If one is missing it prints the install command; if it is installed
+but not signed in, it offers to run the login flow for you. Pass `--skip-setup`
+to bypass this (e.g. in CI).
+
+## `codemate setup`
+
+Re-runs the agent install/login check on its own:
+
+```bash
+codemate setup          # prompts before launching any login
+codemate setup --yes    # run pending logins without prompting
+```
+
+It exits non-zero if an agent is missing or not logged in, so it is safe to use
+as a precondition check.
+
+## `codemate clean`
+
+Deletes codemate files. By default it removes only run artifacts:
+
+```bash
+codemate clean          # delete .team/runs/, .team/lock.json, .team/history
+codemate clean --all    # also delete team.yml, .team/, docs/team.md, gitignore entries
+codemate clean --all --yes   # skip the confirmation prompt
+```
+
+`--all` is the full uninstall from a project: it removes every file `init`
+created and strips the codemate entries from `.gitignore`. You are asked to
+confirm unless `--yes` is given.
+
+## `codemate update`
+
+Upgrades the installed `codemate-team` package to the latest release, using
+whichever installer manages it (uv tool, pipx, or pip):
+
+```bash
+codemate update          # upgrade in place
+codemate update --check  # just report installed vs latest on PyPI
+```
+
+After upgrading, run `codemate init --force` if you also want to refresh the
+generated prompts/schemas/templates in a project.
+
 ## `codemate doctor`
 
 Checks that configured agent commands exist and that simple command-group
